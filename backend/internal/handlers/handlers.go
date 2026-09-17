@@ -403,11 +403,228 @@ func (h *Handler) UpdateFind(c *gin.Context) {
 
 func (h *Handler) DeleteFind(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
+	var linked int64
+	h.DB.Model(&models.DatingSubmission{}).
+		Where("linked_find_id = ? AND status <> ?", id, models.DatingStatusVoid).
+		Count(&linked)
+	if linked > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "该文物存在未作废的测年送检单，无法删除"})
+		return
+	}
 	if err := h.DB.Delete(&models.Find{}, id).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+// ---------- Dating submissions ----------
+
+type datingReq struct {
+	LabName        string `json:"labName"`
+	Method         string `json:"method"`
+	LinkedFindID   *uint  `json:"linkedFindId"`
+	LinkedSampleID *uint  `json:"linkedSampleId"`
+}
+
+// validateLink 校验送检对象必须且只能挂一个。Sample 表尚未建立，挂样品暂不支持。
+func (h *Handler) validateLink(req *datingReq) (uint, string) {
+	hasFind := req.LinkedFindID != nil && *req.LinkedFindID != 0
+	hasSample := req.LinkedSampleID != nil && *req.LinkedSampleID != 0
+	if hasFind == hasSample { // 两个都挂或都不挂
+		return 0, "送检对象必须且只能关联一件文物（Find）"
+	}
+	if hasSample {
+		return 0, "样品（Sample）表尚未建立，当前仅支持关联出土文物"
+	}
+	var find models.Find
+	if err := h.DB.First(&find, *req.LinkedFindID).Error; err != nil {
+		return 0, "关联文物不存在"
+	}
+	return find.ID, ""
+}
+
+func validateDatingFields(req *datingReq) string {
+	if req.LabName == "" {
+		return "实验室名称必填"
+	}
+	if req.Method != "c14" && req.Method != "tl" {
+		return "测年方法仅支持 c14（碳十四）或 tl（热释光）"
+	}
+	return ""
+}
+
+func (h *Handler) preloadDating(q *gorm.DB) *gorm.DB {
+	return q.Preload("LinkedFind.Unit.Site").Preload("LinkedFind.Material")
+}
+
+func (h *Handler) ListDatingSubmissions(c *gin.Context) {
+	var subs []models.DatingSubmission
+	q := h.preloadDating(h.DB.Model(&models.DatingSubmission{})).Order("id desc")
+	if st := c.Query("status"); st != "" {
+		q = q.Where("status = ?", st)
+	}
+	if method := c.Query("method"); method != "" {
+		q = q.Where("method = ?", method)
+	}
+	if findID := c.Query("findId"); findID != "" {
+		q = q.Where("linked_find_id = ?", findID)
+	}
+	if err := q.Find(&subs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, subs)
+}
+
+func (h *Handler) GetDatingSubmission(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var sub models.DatingSubmission
+	if err := h.preloadDating(h.DB).First(&sub, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "送检单不存在"})
+		return
+	}
+	c.JSON(http.StatusOK, sub)
+}
+
+func (h *Handler) CreateDatingSubmission(c *gin.Context) {
+	var req datingReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数无效"})
+		return
+	}
+	if msg := validateDatingFields(&req); msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	findID, msg := h.validateLink(&req)
+	if msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	sub := models.DatingSubmission{
+		LabName:      req.LabName,
+		Method:       req.Method,
+		Status:       models.DatingStatusDraft, // 新建一律为草稿
+		LinkedFindID: &findID,
+	}
+	if err := h.DB.Create(&sub).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	h.preloadDating(h.DB).First(&sub, sub.ID)
+	c.JSON(http.StatusCreated, sub)
+}
+
+// UpdateDatingSubmission 仅 draft 可改；终态（resulted/void）及已送检单不可改关联。
+func (h *Handler) UpdateDatingSubmission(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var sub models.DatingSubmission
+	if err := h.DB.First(&sub, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "送检单不存在"})
+		return
+	}
+	if sub.Status != models.DatingStatusDraft {
+		c.JSON(http.StatusConflict, gin.H{"error": "仅草稿状态可编辑；已送检单据及终态（已出结果/已作废）不可修改关联"})
+		return
+	}
+	var req datingReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数无效"})
+		return
+	}
+	if msg := validateDatingFields(&req); msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	findID, msg := h.validateLink(&req)
+	if msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	sub.LabName = req.LabName
+	sub.Method = req.Method
+	sub.LinkedFindID = &findID
+	if err := h.DB.Save(&sub).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	h.preloadDating(h.DB).First(&sub, sub.ID)
+	c.JSON(http.StatusOK, sub)
+}
+
+func (h *Handler) DeleteDatingSubmission(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var sub models.DatingSubmission
+	if err := h.DB.First(&sub, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "送检单不存在"})
+		return
+	}
+	if sub.Status != models.DatingStatusDraft {
+		c.JSON(http.StatusConflict, gin.H{"error": "仅草稿状态可删除，已送检单据请走作废流程"})
+		return
+	}
+	if err := h.DB.Delete(&models.DatingSubmission{}, id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
+}
+
+type datingTransitionReq struct {
+	Action     string `json:"action"`               // submit | result | void
+	ResultText string `json:"resultText"`
+}
+
+// TransitionDatingSubmission 状态机：
+// draft -> submitted；submitted -> resulted | void；resulted/void 为终态。
+func (h *Handler) TransitionDatingSubmission(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var sub models.DatingSubmission
+	if err := h.DB.First(&sub, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "送检单不存在"})
+		return
+	}
+	var req datingTransitionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数无效"})
+		return
+	}
+
+	now := time.Now()
+	switch req.Action {
+	case "submit":
+		if sub.Status != models.DatingStatusDraft {
+			c.JSON(http.StatusConflict, gin.H{"error": "非法流转：仅草稿（draft）状态可提交送检，当前状态为 " + sub.Status})
+			return
+		}
+		sub.Status = models.DatingStatusSubmitted
+		sub.SubmittedAt = &now
+	case "result":
+		if sub.Status != models.DatingStatusSubmitted {
+			c.JSON(http.StatusConflict, gin.H{"error": "非法流转：仅已送检（submitted）状态可回填结果，当前状态为 " + sub.Status})
+			return
+		}
+		sub.Status = models.DatingStatusResulted
+		sub.ResultedAt = &now
+		sub.ResultText = req.ResultText
+	case "void":
+		if sub.Status != models.DatingStatusSubmitted {
+			c.JSON(http.StatusConflict, gin.H{"error": "非法流转：仅已送检（submitted）状态可作废，当前状态为 " + sub.Status})
+			return
+		}
+		sub.Status = models.DatingStatusVoid
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未知流转操作，仅支持 submit / result / void"})
+		return
+	}
+
+	if err := h.DB.Save(&sub).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	h.preloadDating(h.DB).First(&sub, sub.ID)
+	c.JSON(http.StatusOK, sub)
 }
 
 // ---------- Overview ----------

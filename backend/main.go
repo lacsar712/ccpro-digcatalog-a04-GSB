@@ -45,6 +45,7 @@ func main() {
 		&models.Unit{},
 		&models.Material{},
 		&models.Find{},
+		&models.DatingSubmission{},
 	); err != nil {
 		log.Fatalf("auto migrate failed: %v", err)
 	}
@@ -86,6 +87,13 @@ func main() {
 			auth.POST("/finds", h.CreateFind)
 			auth.PUT("/finds/:id", h.UpdateFind)
 			auth.DELETE("/finds/:id", h.DeleteFind)
+
+			auth.GET("/dating-submissions", h.ListDatingSubmissions)
+			auth.GET("/dating-submissions/:id", h.GetDatingSubmission)
+			auth.POST("/dating-submissions", h.CreateDatingSubmission)
+			auth.PUT("/dating-submissions/:id", h.UpdateDatingSubmission)
+			auth.DELETE("/dating-submissions/:id", h.DeleteDatingSubmission)
+			auth.POST("/dating-submissions/:id/transition", h.TransitionDatingSubmission)
 		}
 	}
 

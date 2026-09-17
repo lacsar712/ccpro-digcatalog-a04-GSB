@@ -69,3 +69,30 @@ type Find struct {
 	Unit         *Unit          `json:"unit,omitempty" gorm:"foreignKey:UnitID"`
 	Material     *Material      `json:"material,omitempty" gorm:"foreignKey:MaterialID"`
 }
+
+// 测年送检状态机
+const (
+	DatingStatusDraft     = "draft"     // 草稿：可编辑/删除/提交
+	DatingStatusSubmitted = "submitted" // 已送检：可回填结果或作废
+	DatingStatusResulted  = "resulted"  // 终态：已出结果
+	DatingStatusVoid      = "void"      // 终态：已作废
+)
+
+// DatingSubmission 测年送检单：送检对象必须且只能挂一个文物（Find）。
+// 系统尚无 Sample 表，当前仅支持挂 Find（见 README 声明）；
+// 预留 LinkedSampleID 字段，未来建立 Sample 表后与 LinkedFindID 互斥。
+type DatingSubmission struct {
+	ID             uint           `json:"id" gorm:"primaryKey"`
+	LabName        string         `json:"labName" gorm:"size:128;not null"`     // 承接实验室
+	Method         string         `json:"method" gorm:"size:16;not null"`      // c14 | tl
+	Status         string         `json:"status" gorm:"size:16;not null;index"` // draft|submitted|resulted|void
+	SubmittedAt    *time.Time     `json:"submittedAt"`
+	ResultedAt     *time.Time     `json:"resultedAt"`
+	ResultText     string         `json:"resultText" gorm:"type:text"` // 回填的测年结果，可空
+	LinkedFindID   *uint          `json:"linkedFindId" gorm:"index"`
+	LinkedSampleID *uint          `json:"linkedSampleId" gorm:"index"` // 预留：Sample 表尚未建立
+	LinkedFind     *Find          `json:"linkedFind,omitempty" gorm:"foreignKey:LinkedFindID"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt"`
+	DeletedAt      gorm.DeletedAt `json:"-" gorm:"index"`
+}

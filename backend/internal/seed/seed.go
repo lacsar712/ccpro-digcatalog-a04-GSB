@@ -107,5 +107,44 @@ func Run(db *gorm.DB) {
 		db.Create(&finds[i])
 	}
 
+	// 测年送检：覆盖 draft / submitted / resulted（另附一张 void 作废单）
+	datingSubs := []models.DatingSubmission{
+		{
+			LabName: "北京大学考古年代学实验室", Method: "c14",
+			Status: models.DatingStatusDraft,
+			LinkedFindID: &finds[0].ID,
+		},
+		{
+			LabName: "社科院考古所碳十四实验室", Method: "c14",
+			Status: models.DatingStatusSubmitted, SubmittedAt: seedTime("2024-07-02T09:30:00"),
+			LinkedFindID: &finds[1].ID,
+		},
+		{
+			LabName: "香港大学热释光实验室", Method: "tl",
+			Status: models.DatingStatusResulted,
+			SubmittedAt: seedTime("2024-04-10T10:00:00"), ResultedAt: seedTime("2024-05-22T15:20:00"),
+			ResultText:   "热释光测年结果：距今约 3450 ± 180 年（TL），与地层年代相符。",
+			LinkedFindID: &finds[2].ID,
+		},
+		{
+			LabName: "社科院考古所碳十四实验室", Method: "c14",
+			Status: models.DatingStatusVoid, SubmittedAt: seedTime("2024-06-01T09:00:00"),
+			ResultText:   "",
+			LinkedFindID: &finds[5].ID,
+		},
+	}
+	for i := range datingSubs {
+		db.Create(&datingSubs[i])
+	}
+
 	log.Println("seed data inserted")
+}
+
+// seedTime 解析种子用时间戳，失败时返回零值时间指针。
+func seedTime(s string) *time.Time {
+	t, err := time.Parse("2006-01-02T15:04:05", s)
+	if err != nil {
+		return nil
+	}
+	return &t
 }
