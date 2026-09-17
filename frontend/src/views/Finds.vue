@@ -52,6 +52,7 @@
             <td>{{ item.storageLoc || '-' }}</td>
             <td>
               <button class="btn secondary small" @click="openEdit(item)">编辑</button>
+              <button class="btn small dating-btn" @click="createDating(item)">测年送检</button>
               <button class="btn danger small" @click="remove(item)">删除</button>
             </td>
           </tr>
@@ -124,7 +125,10 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '../api/http'
+
+const router = useRouter()
 
 const artifactTypes = ['陶片', '青铜器', '骨器', '玉器', '石器', '铁器', '其他']
 const list = ref([])
@@ -229,6 +233,10 @@ async function save() {
   }
 }
 
+function createDating(item) {
+  router.push({ name: 'dating', query: { findId: item.id } })
+}
+
 async function remove(item) {
   if (!confirm(`确认删除文物「${item.registerNo}」？`)) return
   try {
@@ -255,5 +263,13 @@ onMounted(async () => {
 
 .filters label {
   min-width: 200px;
+}
+
+.dating-btn {
+  background: #5d7a64;
+}
+
+.dating-btn:hover {
+  background: #49624f;
 }
 </style>

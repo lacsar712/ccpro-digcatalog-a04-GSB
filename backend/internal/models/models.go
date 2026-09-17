@@ -69,3 +69,34 @@ type Find struct {
 	Unit         *Unit          `json:"unit,omitempty" gorm:"foreignKey:UnitID"`
 	Material     *Material      `json:"material,omitempty" gorm:"foreignKey:MaterialID"`
 }
+
+// 测年方法
+const (
+	DatingMethodC14 = "c14" // 碳十四
+	DatingMethodTL  = "tl"  // 热释光
+)
+
+// 测年送检状态机：draft -> submitted -> resulted | void
+const (
+	DatingStatusDraft     = "draft"     // 草稿
+	DatingStatusSubmitted = "submitted" // 已送检
+	DatingStatusResulted  = "resulted"  // 已出结果（终态）
+	DatingStatusVoid      = "void"      // 已作废（终态）
+)
+
+// DatingSubmission 测年送检单，必须挂接一件出土文物（Find）。
+// 预留 LinkedSampleID：待 Sample 表建立后与 LinkedFindID 二选一互斥。
+type DatingSubmission struct {
+	ID           uint           `json:"id" gorm:"primaryKey"`
+	LabName      string         `json:"labName" gorm:"size:128;not null"`             // 承测实验室
+	Method       string         `json:"method" gorm:"size:16;not null"`              // c14 | tl
+	Status       string         `json:"status" gorm:"size:16;not null;default:draft;index"`
+	LinkedFindID *uint          `json:"linkedFindId" gorm:"index"`                    // 当前仅支持挂文物
+	ResultText   string         `json:"resultText" gorm:"type:text"`                  // 结果文本，可空
+	SubmittedAt  *time.Time     `json:"submittedAt"`
+	ResultedAt   *time.Time     `json:"resultedAt"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
+	LinkedFind   *Find          `json:"linkedFind,omitempty" gorm:"foreignKey:LinkedFindID"`
+}

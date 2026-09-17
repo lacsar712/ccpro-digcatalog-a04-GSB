@@ -107,5 +107,39 @@ func Run(db *gorm.DB) {
 		db.Create(&finds[i])
 	}
 
+	// 测年送检：draft / submitted / resulted / void 各一，均挂接实际出土文物
+	f0, f1, f2, f3 := finds[0].ID, finds[1].ID, finds[2].ID, finds[4].ID
+	submissions := []models.DatingSubmission{
+		{
+			LabName: "社科院考古所碳十四实验室", Method: models.DatingMethodC14,
+			Status:       models.DatingStatusDraft,
+			LinkedFindID: &f0,
+		},
+		{
+			LabName: "北京大学考古文博学院科技考古实验室", Method: models.DatingMethodTL,
+			Status:       models.DatingStatusSubmitted,
+			LinkedFindID: &f1,
+			SubmittedAt:  date("2024-07-02"),
+		},
+		{
+			LabName: "国家文物局碳十四测年中心", Method: models.DatingMethodC14,
+			Status:       models.DatingStatusResulted,
+			LinkedFindID: &f2,
+			SubmittedAt:  date("2024-04-20"),
+			ResultedAt:   date("2024-06-05"),
+			ResultText:   "半衰期 5568 年，经树轮校正年代约 1750–1620 cal BC（95.4% 置信区间），与二里头文化二期年代相符。",
+		},
+		{
+			LabName: "北京大学考古文博学院科技考古实验室", Method: models.DatingMethodTL,
+			Status:       models.DatingStatusVoid,
+			LinkedFindID: &f3,
+			SubmittedAt:  date("2024-07-10"),
+			ResultText:   "样品量不足，实验室退样，本单作废。",
+		},
+	}
+	for i := range submissions {
+		db.Create(&submissions[i])
+	}
+
 	log.Println("seed data inserted")
 }
